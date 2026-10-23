@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10,4 +5,99 @@ generator client {
 
 datasource db {
   provider = "sqlite"
+}
+
+enum ReplyStatus {
+  needs_input
+  information
+  awaiting_approval
+  declined
+  handoff
+}
+
+enum ProposalStatus {
+  awaiting_approval
+  processing
+  pending_verification
+  completed
+  rejected
+  stale
+  failed
+}
+
+model Conversation {
+  id      String @id
+  hotelId String
+  stayId  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+}
+
+model Message {
+  id String @id @default(cuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+
+  eventId String
+  text    String
+
+  status ReplyStatus?
+  reply  String?
+
+  proposal Proposal?
+  traces   Trace[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([conversationId, eventId])
+}
+
+model Proposal {
+  id String @id @default(cuid())
+
+  messageId String  @unique
+  message   Message @relation(fields: [messageId], references: [id])
+
+  stayVersion         Int
+  currentCheckoutAt   String
+  requestedCheckoutAt String
+
+  feeEur Int
+
+  policyDocumentId String
+  policyVersion    Int
+  policyQuote      String
+
+  status ProposalStatus @default(awaiting_approval)
+
+  approvedBy String?
+  approvedAt DateTime?
+
+  receipt Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Trace {
+  id String @id @default(cuid())
+
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id])
+
+  step            String
+  ok              Boolean
+  durationMs      Int
+  remoteRequestId String?
+  detail          Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([messageId])
 }

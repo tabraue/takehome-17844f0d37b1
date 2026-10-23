@@ -10,7 +10,10 @@
     "lint:fix": "eslint --fix",
     "format:check": "prettier --check .",
     "format:fix": "prettier --write .",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio --url \"file://$PWD/dev.db\""
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.10.1",
