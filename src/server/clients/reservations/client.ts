@@ -1,12 +1,12 @@
 import 'server-only'
 import { env } from '@/server/env'
-import { TIMEOUT_MS, USER_AGENT } from '@/server/clients/constants'
+import { callJson } from '@/server/clients/http'
+import type { RawResult } from '@/server/clients/types'
 import {
   CallOptions,
   ChangeOutcome,
   ChangeRequest,
   OperationOutcome,
-  RawResult,
   ReservationsResult,
 } from '@/server/clients/reservations/types'
 import {
@@ -21,52 +21,14 @@ import {
 import { z } from 'zod'
 import { apiErrorBodySchema } from '@/server/schemas/common'
 
-const callReservations = async ({ method, path, token, body }: CallOptions): Promise<RawResult> => {
-  const startedAt = performance.now()
-  const elapsed = () => Math.round(performance.now() - startedAt)
-
-  try {
-    const response = await fetch(`${env.RESERVATIONS_BASE_URL}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': USER_AGENT,
-        'X-Test-Scenario': env.RESERVATIONS_SCENARIO,
-        ...(body !== undefined && { 'Content-Type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      cache: 'no-store',
-    })
-
-    const text = await response.text()
-    let parsed: unknown = null
-    if (text) {
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        parsed = null
-      }
-    }
-
-    return {
-      kind: 'response',
-      status: response.status,
-      body: parsed,
-      meta: {
-        durationMs: elapsed(),
-        httpStatus: response.status,
-        requestId: response.headers.get('x-request-id'),
-      },
-    }
-  } catch (error) {
-    return {
-      kind: 'network_error',
-      reason: error instanceof Error ? error.name : 'unknown',
-      meta: { durationMs: elapsed(), httpStatus: null, requestId: null },
-    }
-  }
-}
+const callReservations = ({ method, path, token, body }: CallOptions): Promise<RawResult> =>
+  callJson({
+    url: `${env.RESERVATIONS_BASE_URL}${path}`,
+    method,
+    token,
+    scenario: env.RESERVATIONS_SCENARIO,
+    body,
+  })
 
 const toResult = <T>(
   raw: RawResult,

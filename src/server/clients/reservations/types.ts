@@ -1,14 +1,5 @@
 import type { Receipt } from '@/server/schemas/reservations'
-
-export type CallMeta = {
-  durationMs: number
-  httpStatus: number | null
-  requestId: string | null
-}
-
-export type RawResult =
-  | { kind: 'response'; status: number; body: unknown; meta: CallMeta }
-  | { kind: 'network_error'; reason: string; meta: CallMeta }
+import type { CallMeta } from '@/server/clients/types'
 
 export type ReservationsError =
   | { kind: 'api_error'; status: number; code: string | null; message: string | null }
