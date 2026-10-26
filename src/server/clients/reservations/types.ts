@@ -1,3 +1,5 @@
+import type { Receipt } from '@/server/schemas/reservations'
+
 export type CallMeta = {
   durationMs: number
   httpStatus: number | null
@@ -15,6 +17,33 @@ export type ReservationsError =
 
 export type ReservationsResult<T> =
   { ok: true; data: T; meta: CallMeta } | { ok: false; error: ReservationsError; meta: CallMeta }
+
+export type ChangeRequest = {
+  stayId: string
+  requestedCheckoutAt: string
+  expectedVersion: number
+  operationKey: string
+}
+
+export type ChangeOutcome =
+  | { status: 'applied'; receipt: Receipt; replayed: boolean; meta: CallMeta }
+  | { status: 'rejected'; httpStatus: number; code: string; message: string; meta: CallMeta }
+  | {
+      status: 'uncertain'
+      reason: 'network_error' | 'server_error' | 'unexpected_response' | 'receipt_mismatch'
+      detail: string | null
+      meta: CallMeta
+    }
+
+export type OperationOutcome =
+  | { status: 'applied'; receipt: Receipt; meta: CallMeta }
+  | {
+      status: 'unresolved'
+      reason:
+        'not_found' | 'network_error' | 'server_error' | 'unexpected_response' | 'receipt_mismatch'
+      detail: string | null
+      meta: CallMeta
+    }
 
 export type CallOptions = {
   method: 'GET' | 'POST'
