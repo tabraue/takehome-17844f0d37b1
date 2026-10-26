@@ -2,7 +2,7 @@ import 'server-only'
 import { env } from '@/server/env'
 import { TIMEOUT_MS, USER_AGENT } from '@/server/clients/constants'
 import { CallOptions, RawResult, ReservationsResult } from '@/server/clients/reservations/types'
-import { Stay, staySchema } from '@/server/schemas/reservations'
+import { Availability, availabilitySchema, Stay, staySchema } from '@/server/schemas/reservations'
 import { z } from 'zod'
 import { apiErrorBodySchema } from '@/server/schemas/common'
 
@@ -53,12 +53,16 @@ const callReservations = async ({ method, path, token, body }: CallOptions): Pro
   }
 }
 
-const toResult = <T>(raw: RawResult, schema: z.ZodType<T>): ReservationsResult<T> => {
+const toResult = <T>(
+  raw: RawResult,
+  schema: z.ZodType<T>,
+  okStatuses: readonly number[]
+): ReservationsResult<T> => {
   if (raw.kind === 'network_error') {
     return { ok: false, error: { kind: 'network_error', reason: raw.reason }, meta: raw.meta }
   }
 
-  if (raw.status !== 200) {
+  if (!okStatuses.includes(raw.status)) {
     const apiError = apiErrorBodySchema.safeParse(raw.body)
     return {
       ok: false,
@@ -85,7 +89,7 @@ export const getStay = async (token: string, stayId: string): Promise<Reservatio
     path: `/stays/${encodeURIComponent(stayId)}`,
     token,
   })
-  const result = toResult(raw, staySchema)
+  const result = toResult(raw, staySchema, [200])
 
   if (result.ok && result.data.stay_id !== stayId) {
     return { ok: false, error: { kind: 'invalid_response', status: 200 }, meta: result.meta }
@@ -93,12 +97,31 @@ export const getStay = async (token: string, stayId: string): Promise<Reservatio
   return result
 }
 
-// TODO
-/* export const checkAvailability = (token, stayId, requestedCheckoutAt) => {
-  POST /availability/check
+export const checkAvailability = async (
+  token: string,
+  stayId: string,
+  requestedCheckoutAt: string
+): Promise<ReservationsResult<Availability>> => {
+  const raw = await callReservations({
+    method: 'POST',
+    path: '/availability/check',
+    token,
+    body: { stay_id: stayId, requested_checkout_at: requestedCheckoutAt },
+  })
+  const result = toResult(raw, availabilitySchema, [200])
+
+  if (
+    result.ok &&
+    (result.data.requested_checkout_at !== requestedCheckoutAt ||
+      result.data.available !== (result.data.reason === 'available'))
+  ) {
+    return { ok: false, error: { kind: 'invalid_response', status: 200 }, meta: result.meta }
+  }
+  return result
 }
 
-export const applyChange = (
+// TODO
+/* export const applyChange = (
   token,
   { stayId, requestedCheckoutAt, expectedVersion, operationKey }
 ) => {
