@@ -1,6 +1,7 @@
 import { authenticate, requireGuest } from '@/server/auth/session'
 import { errorResponse, HttpError } from '@/server/errors'
 import { messageRequestSchema } from '@/server/schemas/messages'
+import { handleMessage } from '@/server/services/messages'
 
 export async function POST(request: Request) {
   try {
@@ -11,8 +12,7 @@ export async function POST(request: Request) {
       throw new HttpError(422, 'invalid_body', 'Invalid body')
     }
 
-    // TODO: ongoing -> handle message
-    return Response.json({ ok: true, guest: guest.token, body: body.data })
+    return Response.json(await handleMessage(guest, body.data))
   } catch (error) {
     return errorResponse(error)
   }
