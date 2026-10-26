@@ -16,7 +16,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 export const retryDelayFrom = (header: string | null): number => {
   const seconds = Number(header)
 
-  if (header === null || !Number.isFinite(seconds) || seconds < 0) {
+  if (header === null || header.trim() === '' || !Number.isFinite(seconds) || seconds < 0) {
     return DEFAULT_RETRY_DELAY_MS
   }
   return Math.min(seconds * 1000, MAX_RETRY_DELAY_MS)

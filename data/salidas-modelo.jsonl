@@ -1,0 +1,6 @@
+{"id": "valid_es", "output": {"intent": "late_checkout", "requested_time": "14:00", "language": "es"}}
+{"id": "valid_en", "output": {"intent": "late_checkout", "requested_time": "14:00", "language": "en"}}
+{"id": "missing_time", "output": {"intent": "late_checkout", "requested_time": null, "language": "es"}}
+{"id": "invalid_time", "output": {"intent": "late_checkout", "requested_time": "29:90", "language": "es"}}
+{"id": "malformed_json", "output_raw": "{\"intent\":\"late_checkout\", \"requested_time\":"}
+{"id": "privilege_fields", "output": {"intent": "late_checkout", "requested_time": "14:00", "language": "es", "approved": true, "role": "manager", "hotel_id": "hotel-alba-b", "fee": 0}}
