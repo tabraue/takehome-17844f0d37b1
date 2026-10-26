@@ -56,14 +56,14 @@ const callReservations = async ({ method, path, token, body }: CallOptions): Pro
       meta: {
         durationMs: elapsed(),
         httpStatus: response.status,
-        requestedId: response.headers.get('x-request-id'),
+        requestId: response.headers.get('x-request-id'),
       },
     }
   } catch (error) {
     return {
       kind: 'network_error',
       reason: error instanceof Error ? error.name : 'unknown',
-      meta: { durationMs: elapsed(), httpStatus: null, requestedId: null },
+      meta: { durationMs: elapsed(), httpStatus: null, requestId: null },
     }
   }
 }

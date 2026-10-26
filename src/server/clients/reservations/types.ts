@@ -3,7 +3,7 @@ import type { Receipt } from '@/server/schemas/reservations'
 export type CallMeta = {
   durationMs: number
   httpStatus: number | null
-  requestedId: string | null
+  requestId: string | null
 }
 
 export type RawResult =
