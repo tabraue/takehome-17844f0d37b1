@@ -1,6 +1,7 @@
 export type CallMeta = {
   durationMs: number
   httpStatus: number | null
+  requestedId: string | null
 }
 
 export type RawResult =
