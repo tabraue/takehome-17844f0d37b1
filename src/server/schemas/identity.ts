@@ -1,11 +1,10 @@
 import { z } from 'zod'
+import { id } from '@/server/schemas/common'
 
 export const bearerTokenSchema = z
   .string()
   .regex(/^Bearer \S+$/)
   .transform((header) => header.slice('Bearer '.length))
-
-const id = z.string().min(1)
 
 const guestSchema = z
   .object({

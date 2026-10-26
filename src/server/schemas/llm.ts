@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { timeOfDaySchema } from '@/server/schemas/common'
 
 export const chatCompletionSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string() }) })).min(1),
@@ -15,10 +16,7 @@ export const INTERPRETATION_FIELDS = ['intent', 'requested_time', 'language'] as
 
 export const interpretationSchema = z.object({
   intent: z.literal('late_checkout'),
-  requested_time: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
-    .nullable(),
+  requested_time: timeOfDaySchema.nullable(),
   language: z.enum(['es', 'en']),
 })
 
