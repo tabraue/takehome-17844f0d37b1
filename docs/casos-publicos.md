@@ -281,6 +281,26 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST "$APP/api/proposals/$PROPOSAL_ID/appr
   -H 'Authorization: Bearer manager-b'
 ```
 
+Leer la conversación con otro hotel y con otro huésped:
+
+```bash
+curl -s -w '\nHTTP %{http_code}\n' "$APP/api/conversations/conv-p06-own" -H 'Authorization: Bearer manager-b'
+```
+
+```bash
+curl -s -w '\nHTTP %{http_code}\n' "$APP/api/conversations/conv-p06-own" -H 'Authorization: Bearer guest-a2'
+```
+
+Leerla con el propietario y con su manager, listando las claves que recibe cada uno:
+
+```bash
+curl -s "$APP/api/conversations/conv-p06-own" -H 'Authorization: Bearer guest-a1' | jq '[.. | objects | keys[]] | unique'
+```
+
+```bash
+curl -s "$APP/api/conversations/conv-p06-own" -H 'Authorization: Bearer manager-a' | jq '[.. | objects | keys[]] | unique'
+```
+
 **Termina:**
 
 ```bash
@@ -292,7 +312,10 @@ estado
 - Aprobar con `guest-a1`: 403.
 - Listado de `manager-b`: vacío.
 - Aprobar con `manager-b`: 404.
-- La propuesta sigue en `awaiting_approval` y `applied_changes: 0`.
+- Leer la conversación con `manager-b` o `guest-a2`: 404 `not_found`.
+- Leerla con `guest-a1`: historial, estado, horas e importe, sin `traces`, `trace_id`, `operation_key`, `evidence` ni `receipt`.
+- Leerla con `manager-a`: además, trazas con tokens simulados, evidencia, `operation_key` y `receipt`.
+- La propuesta sigue en `awaiting_approval`, con `applied_changes: 0` y `change_requests: 0`.
 
 ---
 
