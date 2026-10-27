@@ -11,22 +11,13 @@ import type { GuestIdentity } from '@/server/schemas/identity'
 import type { MessageRequest } from '@/server/schemas/messages'
 import { replyFor, type ReplyInput } from '@/server/services/replies'
 import { InterpretResult } from '@/server/clients/llm/types'
-import { CallMeta } from '@/server/clients/types'
-import { saveTraces, type TraceInput } from '@/server/repositories/traces'
+import { callTrace, saveTraces, type TraceInput } from '@/server/repositories/traces'
 
 type Decision = ReplyInput & { proposal?: Prisma.ProposalCreateWithoutMessageInput }
 type StoredMessage = NonNullable<Awaited<ReturnType<typeof messages.findMessage>>>
 type Trace = Prisma.TraceCreateManyMessageInput
 
 const notFound = () => new HttpError(404, 'not_found', 'Conversation or stay not found')
-
-const callTrace = (step: string, meta: CallMeta, ok: boolean, error: string | null): Trace => ({
-  step,
-  ok,
-  error,
-  durationMs: meta.durationMs,
-  remoteRequestId: meta.requestId,
-})
 
 const llmTrace = (result: InterpretResult): Trace => ({
   step: 'llm.interpret',
