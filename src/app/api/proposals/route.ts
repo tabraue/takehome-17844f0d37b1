@@ -1,11 +1,14 @@
 import { authenticate, requireManager } from '@/server/auth/session'
-import { errorResponse, HttpError } from '@/server/errors'
+import { errorResponse } from '@/server/errors'
+import { listProposals } from '@/server/services/proposals'
 
 export async function GET(request: Request) {
   try {
-    requireManager(authenticate(request))
-    // TODO: implement list proposals
-    throw new HttpError(501, 'not_implemented', 'Not implemented yet')
+    const manager = requireManager(authenticate(request))
+
+    const proposals = await listProposals(manager)
+
+    return Response.json(proposals)
   } catch (error) {
     return errorResponse(error)
   }
