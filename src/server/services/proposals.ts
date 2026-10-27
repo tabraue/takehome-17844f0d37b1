@@ -1,6 +1,12 @@
 import 'server-only'
-import { applyChange, checkAvailability, getStay } from '@/server/clients/reservations/client'
+import {
+  applyChange,
+  checkAvailability,
+  getOperation,
+  getStay,
+} from '@/server/clients/reservations/client'
 import { reservationsTokenFor } from '@/server/clients/reservations/credentials'
+import type { ChangeRequest, OperationOutcome } from '@/server/clients/reservations/types'
 import { HttpError } from '@/server/errors'
 import * as proposals from '@/server/repositories/proposals'
 import type { ManagerIdentity } from '@/server/schemas/identity'
@@ -28,6 +34,23 @@ const reply = (httpStatus: number, proposal: proposals.StoredProposal, message: 
     receipt: proposal.receipt,
   },
 })
+
+const changeRequestFor = (proposal: proposals.StoredProposal): ChangeRequest => ({
+  stayId: proposal.message.conversation.stayId,
+  requestedCheckoutAt: proposal.requestedCheckoutAt,
+  expectedVersion: proposal.stayVersion,
+  operationKey: proposal.operationKey,
+})
+
+type UnresolvedReason = Extract<OperationOutcome, { status: 'unresolved' }>['reason']
+
+const unresolvedMessages: Record<UnresolvedReason, string> = {
+  not_found: 'No applied change found for this operation yet; it stays pending verification',
+  network_error: 'Could not reach the reservation service; it stays pending verification',
+  server_error: 'Reservation service unavailable; it stays pending verification',
+  unexpected_response: 'Unexpected reservation service response; it stays pending verification',
+  receipt_mismatch: 'Receipt does not match the proposal; it stays pending verification',
+}
 
 export const listProposals = async (manager: ManagerIdentity) => {
   const hotelProposals = await proposals.listProposalsForHotel(manager.hotelId)
@@ -93,12 +116,7 @@ export const approveProposal = async (manager: ManagerIdentity, proposalId: stri
     return reply(409, stale, 'Reservation changed since the proposal was created')
   }
 
-  const result = await applyChange(token, {
-    stayId,
-    requestedCheckoutAt: proposal.requestedCheckoutAt,
-    expectedVersion: proposal.stayVersion,
-    operationKey: proposal.operationKey,
-  })
+  const result = await applyChange(token, changeRequestFor(proposal))
 
   if (result.status === 'applied') {
     const completed = await proposals.updateProposal(proposal.id, {
@@ -140,4 +158,37 @@ export const rejectProposal = async (manager: ManagerIdentity, proposalId: strin
   }
 
   return reply(200, { ...proposal, status: 'rejected' }, 'Proposal rejected')
+}
+
+export const reconcileProposal = async (manager: ManagerIdentity, proposalId: string) => {
+  const proposal = await proposals.findProposalForHotel(proposalId, manager.hotelId)
+
+  if (!proposal) {
+    throw new HttpError(404, 'not_found', 'Proposal not found')
+  }
+
+  if (proposal.status === 'completed') {
+    return reply(200, proposal, 'Checkout already updated')
+  }
+
+  if (proposal.status === 'processing') {
+    return reply(202, proposal, 'Approval is still being processed')
+  }
+
+  if (proposal.status !== 'pending_verification') {
+    return reply(200, proposal, 'No change pending verification')
+  }
+
+  const outcome = await getOperation(reservationsTokenFor(manager), changeRequestFor(proposal))
+
+  if (outcome.status === 'applied') {
+    const completed = await proposals.updateProposal(proposal.id, {
+      status: 'completed',
+      receipt: outcome.receipt,
+    })
+
+    return reply(200, completed, 'Checkout updated successfully')
+  }
+
+  return reply(202, proposal, unresolvedMessages[outcome.reason])
 }
