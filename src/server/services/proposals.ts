@@ -1,6 +1,9 @@
 import 'server-only'
-import type { ManagerIdentity } from '@/server/schemas/identity'
+import { applyChange, checkAvailability, getStay } from '@/server/clients/reservations/client'
+import { reservationsTokenFor } from '@/server/clients/reservations/credentials'
+import { HttpError } from '@/server/errors'
 import * as proposals from '@/server/repositories/proposals'
+import type { ManagerIdentity } from '@/server/schemas/identity'
 
 const toView = (p: proposals.StoredProposal) => ({
   id: p.id,
@@ -16,10 +19,103 @@ const toView = (p: proposals.StoredProposal) => ({
   receipt: p.receipt,
 })
 
+const reply = (httpStatus: number, proposal: proposals.StoredProposal, message: string) => ({
+  httpStatus,
+  body: {
+    proposal_id: proposal.id,
+    status: proposal.status,
+    message,
+    receipt: proposal.receipt,
+  },
+})
+
 export const listProposals = async (manager: ManagerIdentity) => {
   const hotelProposals = await proposals.listProposalsForHotel(manager.hotelId)
 
   const list = hotelProposals.map((proposal) => toView(proposal))
 
   return list
+}
+
+export const approveProposal = async (manager: ManagerIdentity, proposalId: string) => {
+  const proposal = await proposals.findProposalForHotel(proposalId, manager.hotelId)
+
+  if (!proposal) {
+    throw new HttpError(404, 'not_found', 'Proposal not found')
+  }
+
+  if (proposal.status === 'completed') {
+    return reply(200, proposal, 'Checkout already updated')
+  }
+
+  if (proposal.status === 'pending_verification') {
+    return reply(202, proposal, 'Change sent but not confirmed yet')
+  }
+
+  if (proposal.status !== 'awaiting_approval') {
+    return reply(409, proposal, 'Proposal is not awaiting approval')
+  }
+
+  const claimed = await proposals.moveProposal(proposal.id, 'awaiting_approval', {
+    status: 'processing',
+    approvedBy: manager.token,
+    approvedAt: new Date(),
+  })
+
+  if (!claimed) {
+    throw new HttpError(409, 'proposal_not_executable', 'Proposal is already being processed')
+  }
+
+  const token = reservationsTokenFor(manager)
+  const stayId = proposal.message.conversation.stayId
+
+  const stay = await getStay(token, stayId)
+  const availability = await checkAvailability(token, stayId, proposal.requestedCheckoutAt)
+
+  if (!stay.ok || !availability.ok) {
+    const reopened = await proposals.updateProposal(proposal.id, {
+      status: 'awaiting_approval',
+      approvedBy: null,
+      approvedAt: null,
+    })
+
+    return reply(503, reopened, 'Could not verify the reservation; nothing was changed')
+  }
+
+  const changed =
+    stay.data.version !== proposal.stayVersion ||
+    stay.data.checkout_at !== proposal.currentCheckoutAt ||
+    !availability.data.available
+
+  if (changed) {
+    const stale = await proposals.updateProposal(proposal.id, { status: 'stale' })
+
+    return reply(409, stale, 'Reservation changed since the proposal was created')
+  }
+
+  const result = await applyChange(token, {
+    stayId,
+    requestedCheckoutAt: proposal.requestedCheckoutAt,
+    expectedVersion: proposal.stayVersion,
+    operationKey: proposal.operationKey,
+  })
+
+  if (result.status === 'applied') {
+    const completed = await proposals.updateProposal(proposal.id, {
+      status: 'completed',
+      receipt: result.receipt,
+    })
+
+    return reply(200, completed, 'Checkout updated successfully')
+  }
+
+  if (result.status === 'rejected') {
+    const failed = await proposals.updateProposal(proposal.id, { status: 'failed' })
+
+    return reply(409, failed, `Reservation service rejected the change: ${result.code}`)
+  }
+
+  const pending = await proposals.updateProposal(proposal.id, { status: 'pending_verification' })
+
+  return reply(202, pending, 'Change sent but not confirmed yet')
 }
