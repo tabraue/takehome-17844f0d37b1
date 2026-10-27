@@ -380,6 +380,13 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST "$APP/api/proposals/$PROPOSAL_ID/reco
   -H 'Authorization: Bearer manager-a'
 ```
 
+En este escenario la primera consulta de la operación devuelve 503, así que hay que reconciliar otra vez:
+
+```bash
+curl -s -w '\nHTTP %{http_code}\n' -X POST "$APP/api/proposals/$PROPOSAL_ID/reconcile" \
+  -H 'Authorization: Bearer manager-a'
+```
+
 **Termina:**
 
 ```bash
@@ -389,8 +396,9 @@ estado
 - Aprobación: 202 `pending_verification`, sin éxito ni fallo.
 - Tras reiniciar: mismo `status` y misma `operation_key`.
 - Segunda aprobación: 202, sin enviar otro cambio.
-- `applied_changes: 1` (el cambio sí se guardó en el servicio).
-- ❌ `reconcile` da 404 porque no está implementado: la propuesta no llega a `completed`.
+- Primera reconciliación: 202 `pending_verification` («Reservation service unavailable»).
+- Segunda reconciliación: 200 `completed` con recibo concordante: misma `operation_key`, `version: 2` y salida a las 14:00.
+- `applied_changes: 1` y `change_requests: 1`.
 
 ### Variante: transient-503
 
@@ -420,8 +428,9 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST "$APP/api/proposals/$PROPOSAL_ID/appr
 estado
 ```
 
-- Primera aprobación: no muestra éxito y `applied_changes: 0`.
-- ❌ Queda en `failed` (409) y la segunda aprobación también da 409: no se puede reintentar con la misma clave, como pide el contrato.
+- Primera aprobación: 503 `awaiting_approval` («approve again to retry») y `receipt: null`, sin éxito.
+- Segunda aprobación: 200 `completed` con recibo concordante y la misma `operation_key` de la propuesta.
+- `applied_changes: 1` y `change_requests: 2`: el `503 simulated_rejection` no escribió y el reintento sí.
 
 ---
 
