@@ -127,6 +127,24 @@ export const approveProposal = async (manager: ManagerIdentity, proposalId: stri
     return reply(200, completed, 'Checkout updated successfully')
   }
 
+  if (
+    result.status === 'rejected' &&
+    result.httpStatus === 503 &&
+    result.code === 'simulated_rejection'
+  ) {
+    const reopened = await proposals.updateProposal(proposal.id, {
+      status: 'awaiting_approval',
+      approvedBy: null,
+      approvedAt: null,
+    })
+
+    return reply(
+      503,
+      reopened,
+      'Reservation service did not apply the change; approve again to retry'
+    )
+  }
+
   if (result.status === 'rejected') {
     const failed = await proposals.updateProposal(proposal.id, { status: 'failed' })
 
