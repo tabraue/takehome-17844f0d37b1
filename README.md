@@ -7,6 +7,7 @@ El huésped envía un mensaje. El servidor interpreta la petición, comprueba la
 ## Índice
 
 - [Estado actual](#estado-actual)
+- [Tiempo empleado](#tiempo-empleado)
 - [Stack](#stack)
 - [Puesta en marcha](#puesta-en-marcha)
   - [Requisitos](#requisitos)
@@ -22,6 +23,7 @@ El huésped envía un mensaje. El servidor interpreta la petición, comprueba la
 - [Persistencia](#persistencia)
 - [Trazas](#trazas)
 - [Tests](#tests)
+- [Casos públicos](#casos-públicos)
 - [Reinicio del entorno](#reinicio-del-entorno)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Estructura principal](#estructura-principal)
@@ -53,6 +55,18 @@ Pendientes:
 - `POST /api/proposals/{id}/reconcile`.
 - Trazas de aprobación, rechazo y reconciliación.
 - Tests automatizados de los casos públicos.
+
+## Tiempo empleado
+
+| Día    | Trabajo                                                                   | Tiempo |
+| ------ | ------------------------------------------------------------------------- | ------ |
+| 23 oct | Proyecto Next.js, Prettier, ESLint, Prisma y primer esquema               | 1 h    |
+| 25 oct | Ajustes del modelo de datos, validación del `.env` y conexión a la BD     | 0,5 h  |
+| 26 oct | Identidades, autenticación, errores, Vitest y cliente de reservas + tests | 2 h    |
+| 26 oct | Cliente HTTP común y cliente de la IA simulada + tests                    | 0,75 h |
+| 26 oct | Documentos, políticas, `POST /api/messages`, respuestas y trazas          | 1,5 h  |
+| 27 oct | Listado, aprobación y rechazo de propuestas                               | 1 h    |
+| 27 oct | Script de reinicio del entorno, README y `DECISIONS.md`                   | 20 min |
 
 ## Stack
 
@@ -393,6 +407,25 @@ Todavía no están automatizados:
 - Los flujos de integración con base de datos.
 - La reconciliación de operaciones inciertas.
 
+## Casos públicos
+
+Resultados de los diez grupos de `data/casos-publicos.jsonl`, ejecutados a mano con `curl` el 27 de octubre de 2026 contra los servicios de WorkFactory, reiniciando el entorno antes de cada caso. Las partes marcadas como «sin ejecutar» llevan el resultado esperado según el código. Todavía no están automatizados.
+
+Los pasos para reproducir cada caso, con sus `curl` y las comprobaciones finales, están en [`docs/casos-publicos.md`](docs/casos-publicos.md).
+
+| Caso | Nombre                           | Resultado  | Detalle                                                                                                                                                                                                                                                                                                                      |
+| ---- | -------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P01  | Datos incompletos y contexto     | ⚠️ Parcial | El primer turno da `needs_input`; el segundo, una propuesta de 25 EUR pendiente; otro huésped recibe 404 en la conversación; 0 cambios. Funciona porque la IA interpreta solo el último mensaje y «A las 14:00» ya trae la hora: no se envía el historial de la conversación.                                                |
+| P02  | Camino completo e inglés         | ✅ Pasa    | Respuesta en inglés con 25 EUR; 0 cambios antes de aprobar; cita de `coral-alba-policy` v2; tras aprobar, `completed` con recibo concordante, 1 cambio y salida a las 14:00. Volver a pedir 14:00 da `information` sin propuesta.                                                                                            |
+| P03  | Habitación sin disponibilidad    | ✅ Pasa    | `declined` con la salida actual, sin propuesta y con 0 cambios.                                                                                                                                                                                                                                                              |
+| P04  | Autoridad y contradicción        | ✅ Pasa    | 16:00 da `declined`: la web y la versión inactiva no cuentan. Con una segunda política aprobada v2 de 20 EUR, `handoff` sin propuesta (hay que reiniciar la app, porque los documentos se cargan al arrancar).                                                                                                               |
+| P05  | Inyección en mensaje y documento | ✅ Pasa    | Propuesta normal de 14:00 y 25 EUR pendiente, sin autoaprobar; la respuesta no muestra notas internas; `STAY-B1` sin cambios.                                                                                                                                                                                                |
+| P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación depende de `GET /api/conversations/{id}`, pendiente.                                                                                               |
+| P07  | Duplicados y carrera             | ✅ Pasa    | El duplicado devuelve `replayed: true` con el mismo `proposal_id`; otro texto da 409. De dos aprobaciones concurrentes, una da 200 con recibo y la otra 409; 1 solo cambio.                                                                                                                                                  |
+| P08  | Resultado incierto y reinicio    | ❌ Falla   | `response-lost`: no se puede completar porque falta `POST /api/proposals/{id}/reconcile`. `transient-503` (sin ejecutar): el 503 `simulated_rejection` marca la propuesta como `failed` y no permite reintentar con la misma clave.                                                                                          |
+| P09  | Propuesta obsoleta               | ⚠️ Parcial | `stale-availability`: la aprobación da 409 `stale` (la reserva pasó a la versión 2) sin enviar el cambio; una nueva petición da `declined`; 0 cambios. Variante de política v3 (sin ejecutar): la aprobación no vuelve a comprobar la política y ejecutaría el cambio con el importe antiguo.                                |
+| P10  | Modelo inválido y rechazo        | ✅ Pasa    | `malformed-json`: `handoff` sin propuesta. `transient-503`: un reintento (2 peticiones) y propuesta pendiente. Rechazar y después aprobar: 200 `rejected` y 409, sin llamar al servicio. `invalid-time` y `privilege-fields` (sin ejecutar): `handoff` y descarte de los campos extra, respectivamente. En todos, 0 cambios. |
+
 ## Reinicio del entorno
 
 Para volver al estado inicial:
@@ -408,6 +441,14 @@ El script `scripts/reset-environment.mts`:
 3. Restablece la IA simulada (`POST /test/reset` con `LLM_TESTER_TOKEN`).
 
 Para reiniciar solo la base de datos local, sin tocar los servicios remotos, usar `pnpm db:reset`.
+
+### Cambiar de escenario
+
+1. Cambiar `RESERVATIONS_SCENARIO` o `LLM_SCENARIO` en `.env`.
+2. Parar la app.
+3. Ejecutar `pnpm env:reset && pnpm dev`.
+
+La app y el script leen `.env` solo al arrancar, y **no sobrescriben las variables que ya existan en la terminal**. Si en la terminal de `pnpm dev` se ha hecho `source .env`, se siguen usando esos valores aunque cambie `.env`. Conviene arrancar la app en una terminal limpia.
 
 ## Limitaciones conocidas
 
@@ -436,7 +477,8 @@ src/
     ├── schemas/          Validación con Zod
     └── services/         Orquestación de casos de uso
 
-data/                     Documentos e identidades del kit
+data/                     Documentos, identidades y casos públicos del kit
+docs/                     Guía para reproducir los casos públicos
 prisma/                   Esquema y migraciones
 scripts/                  Reinicio del entorno
 tests/                    Tests unitarios
