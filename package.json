@@ -14,6 +14,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
+    "env:reset": "tsx scripts/reset-environment.mts",
     "db:studio": "prisma studio --url \"file://$PWD/dev.db\"",
     "test": "vitest run",
     "test:watch": "vitest"
