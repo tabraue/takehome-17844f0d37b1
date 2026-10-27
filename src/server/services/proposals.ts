@@ -119,3 +119,25 @@ export const approveProposal = async (manager: ManagerIdentity, proposalId: stri
 
   return reply(202, pending, 'Change sent but not confirmed yet')
 }
+
+export const rejectProposal = async (manager: ManagerIdentity, proposalId: string) => {
+  const proposal = await proposals.findProposalForHotel(proposalId, manager.hotelId)
+
+  if (!proposal) {
+    throw new HttpError(404, 'not_found', 'Proposal not found')
+  }
+
+  if (proposal.status === 'rejected') {
+    return reply(200, proposal, 'Proposal already rejected')
+  }
+
+  const moved = await proposals.moveProposal(proposal.id, 'awaiting_approval', {
+    status: 'rejected',
+  })
+
+  if (!moved) {
+    return reply(409, proposal, 'Proposal is being executed or already finished')
+  }
+
+  return reply(200, { ...proposal, status: 'rejected' }, 'Proposal rejected')
+}
