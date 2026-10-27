@@ -8,7 +8,7 @@ export async function GET(request: Request) {
 
     const proposals = await listProposals(manager)
 
-    return Response.json(proposals)
+    return Response.json({ proposals })
   } catch (error) {
     return errorResponse(error)
   }
