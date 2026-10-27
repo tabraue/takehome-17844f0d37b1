@@ -42,6 +42,8 @@ Implementado:
 - Procesamiento de mensajes.
 - Deduplicación de eventos.
 - Creación, aprobación y rechazo de propuestas.
+- Reconciliación de operaciones inciertas.
+- Reintento con la misma `operation_key` tras un `503 simulated_rejection`.
 - Persistencia local con Prisma y SQLite.
 - Trazas de las operaciones principales.
 - Tests unitarios sin red.
@@ -52,7 +54,6 @@ Pendientes:
 - Interfaz para huéspedes y managers.
 - Contexto entre mensajes de una misma conversación.
 - `GET /api/conversations/{id}`.
-- `POST /api/proposals/{id}/reconcile`.
 - Trazas de aprobación, rechazo y reconciliación.
 - Tests automatizados de los casos públicos.
 
@@ -67,6 +68,8 @@ Pendientes:
 | 26 oct | Documentos, políticas, `POST /api/messages`, respuestas y trazas          | 1,5 h  |
 | 27 oct | Listado, aprobación y rechazo de propuestas                               | 1 h    |
 | 27 oct | Script de reinicio del entorno, README y `DECISIONS.md`                   | 20 min |
+
+Después de la entrega, fuera de estas 8 h, se añadieron la reconciliación y el reintento tras `503 simulated_rejection`.
 
 ## Stack
 
@@ -165,7 +168,7 @@ Implementa el contrato `contratos/app-api.md` del kit. Autenticación con `Autho
 | `GET`  | `/api/proposals`                | Manager                      | Implementado |
 | `POST` | `/api/proposals/{id}/approve`   | Manager                      | Implementado |
 | `POST` | `/api/proposals/{id}/reject`    | Manager                      | Implementado |
-| `POST` | `/api/proposals/{id}/reconcile` | Manager                      | Pendiente    |
+| `POST` | `/api/proposals/{id}/reconcile` | Manager                      | Implementado |
 
 Los errores siguen este formato:
 
@@ -281,7 +284,7 @@ stateDiagram-v2
   [*] --> awaiting_approval: mensaje válido con disponibilidad
   awaiting_approval --> rejected: reject
   awaiting_approval --> processing: approve (transición atómica)
-  processing --> awaiting_approval: no se pudo revalidar (503 / red)
+  processing --> awaiting_approval: sin revalidar (503 / red) o 503 simulated_rejection
   processing --> stale: cambió reserva o disponibilidad
   processing --> completed: recibo concordante
   processing --> failed: el servicio rechaza el cambio
@@ -315,7 +318,7 @@ Se utilizan las siguientes operaciones:
 - `GET /stays/{id}`
 - `POST /availability/check`
 - `POST /changes`
-- `GET /operations/{key}` (cliente listo; lo usará la reconciliación, aún pendiente)
+- `GET /operations/{key}` (solo desde la reconciliación)
 
 ### IA simulada
 
@@ -335,6 +338,8 @@ Se utiliza `POST /chat/completions`. La salida se valida con un esquema estricto
 - Una respuesta perdida nunca se marca automáticamente como éxito.
 - Un recibo no concordante nunca se considera confirmación válida.
 - Las operaciones inciertas quedan en `pending_verification`.
+- La reconciliación solo consulta la operación con su `operation_key`; nunca envía otro cambio.
+- Un `503 simulated_rejection` garantiza que no se escribió: la propuesta vuelve a `awaiting_approval` con la misma `operation_key` y se reintenta al aprobarla de nuevo.
 
 ## Políticas del hotel
 
@@ -422,7 +427,7 @@ Los pasos para reproducir cada caso, con sus `curl` y las comprobaciones finales
 | P05  | Inyección en mensaje y documento | ✅ Pasa    | Propuesta normal de 14:00 y 25 EUR pendiente, sin autoaprobar; la respuesta no muestra notas internas; `STAY-B1` sin cambios.                                                                                                                                                                                                |
 | P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación depende de `GET /api/conversations/{id}`, pendiente.                                                                                               |
 | P07  | Duplicados y carrera             | ✅ Pasa    | El duplicado devuelve `replayed: true` con el mismo `proposal_id`; otro texto da 409. De dos aprobaciones concurrentes, una da 200 con recibo y la otra 409; 1 solo cambio.                                                                                                                                                  |
-| P08  | Resultado incierto y reinicio    | ❌ Falla   | `response-lost`: no se puede completar porque falta `POST /api/proposals/{id}/reconcile`. `transient-503` (sin ejecutar): el 503 `simulated_rejection` marca la propuesta como `failed` y no permite reintentar con la misma clave.                                                                                          |
+| P08  | Resultado incierto y reinicio    | ✅ Pasa    | Repetido tras la entrega. `response-lost`: 202 `pending_verification`, misma `operation_key` tras reiniciar; el primer `reconcile` da 202 (503 al consultar) y el segundo, 200 `completed` con recibo. `transient-503`: vuelve a `awaiting_approval` y al reaprobar, 200 `completed` con la misma clave. En ambos, 1 cambio. |
 | P09  | Propuesta obsoleta               | ⚠️ Parcial | `stale-availability`: la aprobación da 409 `stale` (la reserva pasó a la versión 2) sin enviar el cambio; una nueva petición da `declined`; 0 cambios. Variante de política v3 (sin ejecutar): la aprobación no vuelve a comprobar la política y ejecutaría el cambio con el importe antiguo.                                |
 | P10  | Modelo inválido y rechazo        | ✅ Pasa    | `malformed-json`: `handoff` sin propuesta. `transient-503`: un reintento (2 peticiones) y propuesta pendiente. Rechazar y después aprobar: 200 `rejected` y 409, sin llamar al servicio. `invalid-time` y `privilege-fields` (sin ejecutar): `handoff` y descarte de los campos extra, respectivamente. En todos, 0 cambios. |
 
@@ -461,7 +466,7 @@ La app y el script leen `.env` solo al arrancar, y **no sobrescriben las variabl
 - No se interpretan calendarios ni zonas horarias.
 - Los documentos se cargan al iniciar la aplicación.
 - SQLite está pensado para una única instancia local.
-- La reconciliación de operaciones inciertas todavía está pendiente.
+- Si la app se cae a mitad de una aprobación, la propuesta se queda en `processing` y la reconciliación no la recupera.
 
 ## Estructura principal
 
