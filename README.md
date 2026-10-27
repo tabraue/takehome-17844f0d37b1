@@ -44,6 +44,7 @@ Implementado:
 - Creación, aprobación y rechazo de propuestas.
 - Reconciliación de operaciones inciertas.
 - Reintento con la misma `operation_key` tras un `503 simulated_rejection`.
+- Consulta del historial y estado de una conversación.
 - Persistencia local con Prisma y SQLite.
 - Trazas de las operaciones principales.
 - Tests unitarios sin red.
@@ -53,7 +54,6 @@ Pendientes:
 
 - Interfaz para huéspedes y managers.
 - Contexto entre mensajes de una misma conversación.
-- `GET /api/conversations/{id}`.
 - Trazas de aprobación, rechazo y reconciliación.
 - Tests automatizados de los casos públicos.
 
@@ -69,7 +69,7 @@ Pendientes:
 | 27 oct | Listado, aprobación y rechazo de propuestas                               | 1 h    |
 | 27 oct | Script de reinicio del entorno, README y `DECISIONS.md`                   | 20 min |
 
-Después de la entrega, fuera de estas 8 h, se añadieron la reconciliación y el reintento tras `503 simulated_rejection`.
+Después de la entrega, fuera de estas 8 h, se añadieron la reconciliación, el reintento tras `503 simulated_rejection` y `GET /api/conversations/{id}`.
 
 ## Stack
 
@@ -164,11 +164,13 @@ Implementa el contrato `contratos/app-api.md` del kit. Autenticación con `Autho
 | Método | Ruta                            | Rol                          | Estado       |
 | ------ | ------------------------------- | ---------------------------- | ------------ |
 | `POST` | `/api/messages`                 | Huésped                      | Implementado |
-| `GET`  | `/api/conversations/{id}`       | Huésped o manager autorizado | Pendiente    |
+| `GET`  | `/api/conversations/{id}`       | Huésped o manager autorizado | Implementado |
 | `GET`  | `/api/proposals`                | Manager                      | Implementado |
 | `POST` | `/api/proposals/{id}/approve`   | Manager                      | Implementado |
 | `POST` | `/api/proposals/{id}/reject`    | Manager                      | Implementado |
 | `POST` | `/api/proposals/{id}/reconcile` | Manager                      | Implementado |
+
+`GET /api/conversations/{id}` responde al huésped propietario o al manager de ese hotel; cualquier otra sesión recibe 404. Devuelve los mensajes en orden, cada uno con su respuesta y su propuesta, y un `status` con el estado más reciente: el de la propuesta si el último mensaje creó una, o el del mensaje si no. El manager ve además las trazas, la evidencia, la `operation_key` y el recibo.
 
 Los errores siguen este formato:
 
@@ -213,7 +215,7 @@ flowchart TB
   UI["Web<br/>huésped · manager"]
   API["Route handlers<br/>src/app/api"]
   AUTH["auth<br/>token → identidad"]
-  SVC["services<br/>messages · proposals · replies"]
+  SVC["services<br/>messages · proposals · conversations · replies"]
   DOM["domain/policy<br/>reglas y cita"]
   REPO["repositories<br/>Prisma"]
   CLI["clients<br/>reservations · llm"]
@@ -329,6 +331,7 @@ Se utiliza `POST /chat/completions`. La salida se valida con un esquema estricto
 - El rol, hotel y reserva se obtienen del token.
 - Los datos enviados por el huésped no pueden cambiar sus permisos.
 - Los huéspedes solo pueden acceder a sus propias conversaciones.
+- Las trazas, la evidencia, la `operation_key` y el recibo de una conversación solo se devuelven al manager.
 - Los managers solo pueden consultar propuestas de su hotel.
 - Las credenciales de cada sesión se mantienen separadas.
 - Los campos desconocidos se rechazan.
@@ -374,7 +377,7 @@ Las reservas, los documentos y las identidades no se copian a la base de datos. 
 
 ## Trazas
 
-Cada mensaje registra en `Trace` los pasos de su procesamiento. El `trace_id` que devuelve la API es el `id` del mensaje.
+Cada mensaje registra en `Trace` los pasos de su procesamiento. El `trace_id` que devuelve la API es el `id` del mensaje. El manager las consulta en `GET /api/conversations/{id}`.
 
 | Paso                              | Qué registra                               |
 | --------------------------------- | ------------------------------------------ |
@@ -425,7 +428,7 @@ Los pasos para reproducir cada caso, con sus `curl` y las comprobaciones finales
 | P03  | Habitación sin disponibilidad    | ✅ Pasa    | `declined` con la salida actual, sin propuesta y con 0 cambios.                                                                                                                                                                                                                                                              |
 | P04  | Autoridad y contradicción        | ✅ Pasa    | 16:00 da `declined`: la web y la versión inactiva no cuentan. Con una segunda política aprobada v2 de 20 EUR, `handoff` sin propuesta (hay que reiniciar la app, porque los documentos se cargan al arrancar).                                                                                                               |
 | P05  | Inyección en mensaje y documento | ✅ Pasa    | Propuesta normal de 14:00 y 25 EUR pendiente, sin autoaprobar; la respuesta no muestra notas internas; `STAY-B1` sin cambios.                                                                                                                                                                                                |
-| P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación depende de `GET /api/conversations/{id}`, pendiente.                                                                                               |
+| P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación da 404 a `manager-b` y `guest-a2`; `guest-a1` la ve sin trazas ni datos de la operación.                                          |
 | P07  | Duplicados y carrera             | ✅ Pasa    | El duplicado devuelve `replayed: true` con el mismo `proposal_id`; otro texto da 409. De dos aprobaciones concurrentes, una da 200 con recibo y la otra 409; 1 solo cambio.                                                                                                                                                  |
 | P08  | Resultado incierto y reinicio    | ✅ Pasa    | Repetido tras la entrega. `response-lost`: 202 `pending_verification`, misma `operation_key` tras reiniciar; el primer `reconcile` da 202 (503 al consultar) y el segundo, 200 `completed` con recibo. `transient-503`: vuelve a `awaiting_approval` y al reaprobar, 200 `completed` con la misma clave. En ambos, 1 cambio. |
 | P09  | Propuesta obsoleta               | ⚠️ Parcial | `stale-availability`: la aprobación da 409 `stale` (la reserva pasó a la versión 2) sin enviar el cambio; una nueva petición da `declined`; 0 cambios. Variante de política v3 (sin ejecutar): la aprobación no vuelve a comprobar la política y ejecutaría el cambio con el importe antiguo.                                |
