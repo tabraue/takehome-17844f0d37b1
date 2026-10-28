@@ -41,3 +41,5 @@ export type Stay = z.infer<typeof staySchema>
 export type Availability = z.infer<typeof availabilitySchema>
 export type Receipt = z.infer<typeof receiptSchema>
 export type Operation = z.infer<typeof operationSchema>
+
+export const storedReceipt = (value: unknown) => value as Receipt | null

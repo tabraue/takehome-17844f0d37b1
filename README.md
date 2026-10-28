@@ -15,6 +15,7 @@ El huésped envía un mensaje. El servidor interpreta la petición, comprueba la
   - [Instalación](#instalación)
 - [Comandos](#comandos)
 - [API](#api)
+- [Interfaz web](#interfaz-web)
 - [Arquitectura](#arquitectura)
 - [Estados](#estados)
 - [Servicios externos](#servicios-externos)
@@ -45,6 +46,7 @@ Implementado:
 - Reconciliación de operaciones inciertas.
 - Reintento con la misma `operation_key` tras un `503 simulated_rejection`.
 - Consulta del historial y estado de una conversación.
+- Interfaz web para huéspedes y managers.
 - Persistencia local con Prisma y SQLite.
 - Trazas de las operaciones principales.
 - Tests unitarios sin red.
@@ -52,7 +54,6 @@ Implementado:
 
 Pendientes:
 
-- Interfaz para huéspedes y managers.
 - Contexto entre mensajes de una misma conversación.
 - Trazas de aprobación, rechazo y reconciliación.
 - Tests automatizados de los casos públicos.
@@ -69,7 +70,7 @@ Pendientes:
 | 27 oct | Listado, aprobación y rechazo de propuestas                               | 1 h    |
 | 27 oct | Script de reinicio del entorno, README y `DECISIONS.md`                   | 20 min |
 
-Después de la entrega, fuera de estas 8 h, se añadieron la reconciliación, el reintento tras `503 simulated_rejection` y `GET /api/conversations/{id}`.
+Después de la entrega, fuera de estas 8 h, se añadieron la reconciliación, el reintento tras `503 simulated_rejection`, `GET /api/conversations/{id}` y la interfaz web.
 
 ## Stack
 
@@ -172,6 +173,8 @@ Implementa el contrato `contratos/app-api.md` del kit. Autenticación con `Autho
 
 `GET /api/conversations/{id}` responde al huésped propietario o al manager de ese hotel; cualquier otra sesión recibe 404. Devuelve los mensajes en orden, cada uno con su respuesta y su propuesta, y un `status` con el estado más reciente: el de la propuesta si el último mensaje creó una, o el del mensaje si no. El manager ve además las trazas, la evidencia, la `operation_key` y el recibo.
 
+Cada propuesta de `GET /api/proposals` incluye además su `conversation_id`, que la web usa para cargar el detalle.
+
 Los errores siguen este formato:
 
 ```json
@@ -206,6 +209,18 @@ curl -X POST http://localhost:3000/api/messages \
   }'
 ```
 
+## Interfaz web
+
+Una sola página en <http://localhost:3000> con dos paneles. Cada uno elige una sesión de demostración de `data/identidades.json`. En la URL solo van las dos sesiones (`?guest=…&manager=…`) y, tras «Nueva conversación», un `chat=…` corto; con eso el servidor renderiza la página completa. El filtro y el detalle de las propuestas viven en el navegador: se filtra sobre la lista ya cargada y el detalle se abre con un `<details>` nativo, así que una recarga los deja como al principio.
+
+- **Lecturas**: la página y los paneles son Server Components. Resuelven la sesión de la URL con las identidades del kit y llaman a los mismos servicios que la API, con las mismas comprobaciones de rol, hotel y reserva. Si el código no existe o es de otro rol, se usa la primera sesión de ese rol.
+- **Escrituras**: enviar, aprobar, rechazar y comprobar se hacen desde componentes cliente pequeños, contra la misma API que los `curl`, con `Authorization: Bearer <sesión>`. Después se llama a `router.refresh()`: los dos paneles se vuelven a renderizar en el servidor y el huésped ve enseguida la decisión del responsable.
+
+Al navegador solo llegan los códigos de sesión, nunca las claves de los servicios remotos.
+
+- **Huésped**: envía mensajes y ve el historial con el estado actual de cada propuesta. La conversación por defecto es `conv-<sesión>`, y «Nueva conversación» abre otra, `conv-<sesión>-<chat>`. Cada mensaje lleva un `event_id` nuevo; si el envío falla, al reintentar el mismo texto se reutiliza, y el servidor lo trata como un duplicado.
+- **Responsable**: propuestas de su hotel, con filtros por los cinco grupos de estado. Puede aprobar, rechazar y comprobar (`reconcile`) las que tienen el cambio sin comprobar. El detalle muestra el documento con su cita, la `operation_key`, el recibo y el registro de trazas del mensaje, con los tokens marcados como simulados.
+
 ## Arquitectura
 
 ### Componentes
@@ -224,7 +239,8 @@ flowchart TB
   RES["Reservas<br/>WorkFactory"]
   LLM["IA simulada<br/>WorkFactory"]
 
-  UI -->|Bearer token de demo| API
+  UI -->|escrituras con Bearer token de demo| API
+  UI -.->|lecturas en Server Components| SVC
   API --> AUTH
   API --> SVC
   SVC --> DOM
@@ -243,19 +259,19 @@ flowchart TB
   class DB,DOCS data
 ```
 
-En azul, el navegador (la interfaz aún está pendiente); en gris, los datos locales; en amarillo, los servicios remotos; el resto es código del servidor (`src/app/api` y `src/server`).
+En azul, la web (`src/app/page.tsx` y `src/components`); en gris, los datos locales; en amarillo, los servicios remotos; el resto es código del servidor (`src/app/api` y `src/server`).
 
 ### Capas principales
 
-| Capa          | Ubicación                 | Responsabilidad                                                     |
-| ------------- | ------------------------- | ------------------------------------------------------------------- |
-| Rutas         | `src/app/api`             | Autenticar, validar el cuerpo, llamar al servicio, traducir errores |
-| Autenticación | `src/server/auth`         | Resolver token, rol, hotel y reserva                                |
-| Servicios     | `src/server/services`     | Orquestar los casos de uso                                          |
-| Dominio       | `src/server/domain`       | Aplicar reglas y seleccionar políticas                              |
-| Repositorios  | `src/server/repositories` | Persistir datos con Prisma                                          |
-| Clientes      | `src/server/clients`      | Comunicarse con los servicios remotos                               |
-| Esquemas      | `src/server/schemas`      | Validar datos con Zod                                               |
+| Capa          | Ubicación                         | Responsabilidad                                                     |
+| ------------- | --------------------------------- | ------------------------------------------------------------------- |
+| Rutas         | `src/app/api`                     | Autenticar, validar el cuerpo, llamar al servicio, traducir errores |
+| Autenticación | `src/server/auth`                 | Resolver token, rol, hotel y reserva                                |
+| Servicios     | `src/server/services`             | Orquestar los casos de uso                                          |
+| Dominio       | `src/server/domain`, `src/domain` | Reglas de negocio y estados compartidos                             |
+| Repositorios  | `src/server/repositories`         | Persistir datos con Prisma                                          |
+| Clientes      | `src/server/clients`              | Comunicarse con los servicios remotos                               |
+| Esquemas      | `src/server/schemas`              | Validar datos con Zod                                               |
 
 ## Estados
 
@@ -299,7 +315,7 @@ stateDiagram-v2
   failed --> [*]
 ```
 
-En la interfaz web (pendiente), los estados se agruparán así, según el enunciado:
+En la interfaz web, los estados se agrupan así, según el enunciado:
 
 | Etiqueta                | Estado                               |
 | ----------------------- | ------------------------------------ |
@@ -428,7 +444,7 @@ Los pasos para reproducir cada caso, con sus `curl` y las comprobaciones finales
 | P03  | Habitación sin disponibilidad    | ✅ Pasa    | `declined` con la salida actual, sin propuesta y con 0 cambios.                                                                                                                                                                                                                                                              |
 | P04  | Autoridad y contradicción        | ✅ Pasa    | 16:00 da `declined`: la web y la versión inactiva no cuentan. Con una segunda política aprobada v2 de 20 EUR, `handoff` sin propuesta (hay que reiniciar la app, porque los documentos se cargan al arrancar).                                                                                                               |
 | P05  | Inyección en mensaje y documento | ✅ Pasa    | Propuesta normal de 14:00 y 25 EUR pendiente, sin autoaprobar; la respuesta no muestra notas internas; `STAY-B1` sin cambios.                                                                                                                                                                                                |
-| P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación da 404 a `manager-b` y `guest-a2`; `guest-a1` la ve sin trazas ni datos de la operación.                                          |
+| P06  | Aislamiento y rol                | ✅ Pasa    | `STAY-B1` con `guest-a1` da 404; `guest-a1` al aprobar, 403; `manager-b` lista vacía y 404 al aprobar; la propuesta sigue pendiente y hay 0 cambios. Leer la conversación da 404 a `manager-b` y `guest-a2`; `guest-a1` la ve sin trazas ni datos de la operación.                                                           |
 | P07  | Duplicados y carrera             | ✅ Pasa    | El duplicado devuelve `replayed: true` con el mismo `proposal_id`; otro texto da 409. De dos aprobaciones concurrentes, una da 200 con recibo y la otra 409; 1 solo cambio.                                                                                                                                                  |
 | P08  | Resultado incierto y reinicio    | ✅ Pasa    | Repetido tras la entrega. `response-lost`: 202 `pending_verification`, misma `operation_key` tras reiniciar; el primer `reconcile` da 202 (503 al consultar) y el segundo, 200 `completed` con recibo. `transient-503`: vuelve a `awaiting_approval` y al reaprobar, 200 `completed` con la misma clave. En ambos, 1 cambio. |
 | P09  | Propuesta obsoleta               | ⚠️ Parcial | `stale-availability`: la aprobación da 409 `stale` (la reserva pasó a la versión 2) sin enviar el cambio; una nueva petición da `declined`; 0 cambios. Variante de política v3 (sin ejecutar): la aprobación no vuelve a comprobar la política y ejecutaría el cambio con el importe antiguo.                                |
@@ -462,7 +478,7 @@ La app y el script leen `.env` solo al arrancar, y **no sobrescriben las variabl
 
 - Las sesiones son tokens fijos de demo.
 - No existe inicio de sesión real.
-- La interfaz web aún no está implementada.
+- La web no lista las conversaciones anteriores del huésped: tras recargar, vuelve a `conv-<sesión>`.
 - Solo se contemplan español e inglés.
 - La IA simulada reconoce un conjunto limitado de expresiones.
 - Se trabaja con una fecha de salida fija.
@@ -476,7 +492,15 @@ La app y el script leen `.env` solo al arrancar, y **no sobrescriben las variabl
 ```text
 src/
 ├── app/
-│   └── api/              Route handlers
+│   ├── api/              Route handlers
+│   └── page.tsx          Página única de la demo (Server Component)
+├── components/           Paneles de huésped y responsable
+│   ├── *-panel.tsx       Server Components que leen los datos
+│   ├── *-actions.tsx     Componentes cliente: formulario y botones que llaman a la API
+│   └── ui/               Piezas de presentación
+├── client/               Cliente HTTP del navegador; solo lo importan Client Components
+├── domain/               Reglas puras compartidas por la presentación
+├── utils/                Estado en la URL y formato
 └── server/
     ├── auth/             Autenticación y sesiones
     ├── clients/          Clientes HTTP
