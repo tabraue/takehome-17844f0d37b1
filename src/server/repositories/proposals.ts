@@ -3,7 +3,9 @@ import { prisma } from '@/server/db'
 import { ProposalStatus } from '@/generated/prisma/enums'
 import { Prisma } from '@/generated/prisma/client'
 
-const includeStay = { message: { select: { conversation: { select: { stayId: true } } } } } as const
+const includeStay = {
+  message: { select: { conversation: { select: { id: true, stayId: true } } } },
+} as const
 
 export const listProposalsForHotel = (hotelId: string) =>
   prisma.proposal.findMany({

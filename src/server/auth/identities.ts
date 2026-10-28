@@ -6,6 +6,8 @@ const { identities } = identitiesFileSchema.parse(identitiesFile)
 
 const identitiesByToken = new Map(identities.map((identity) => [identity.token, identity]))
 
+export const listIdentities = (): Identity[] => identities
+
 export const findIdentityByToken = (token: string): Identity | undefined => {
   return identitiesByToken.get(token)
 }

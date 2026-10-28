@@ -14,4 +14,16 @@ export const findConversation = (id: string, scope: ConversationScope) =>
     },
   })
 
+export const listConversationsForHotel = (hotelId: string) =>
+  prisma.conversation.findMany({
+    where: { hotelId },
+    orderBy: { updatedAt: 'desc' },
+    include: {
+      messages: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: { proposal: true, traces: { orderBy: { createdAt: 'asc' } } },
+      },
+    },
+  })
+
 export type StoredConversation = NonNullable<Awaited<ReturnType<typeof findConversation>>>

@@ -1,7 +1,8 @@
 import 'server-only'
 import { HttpError } from '@/server/errors'
 import * as conversations from '@/server/repositories/conversations'
-import type { Identity } from '@/server/schemas/identity'
+import type { Identity, ManagerIdentity } from '@/server/schemas/identity'
+import { storedReceipt } from '@/server/schemas/reservations'
 
 type StoredMessage = conversations.StoredConversation['messages'][number]
 type StoredProposal = NonNullable<StoredMessage['proposal']>
@@ -23,7 +24,7 @@ const managerProposal = (proposal: StoredProposal) => ({
     quote: proposal.policyQuote,
   },
   operation_key: proposal.operationKey,
-  receipt: proposal.receipt,
+  receipt: storedReceipt(proposal.receipt),
 })
 
 const toTrace = (trace: StoredTrace) => ({
@@ -35,7 +36,7 @@ const toTrace = (trace: StoredTrace) => ({
   detail: trace.detail,
   simulated_prompt_tokens: trace.simulatedPromptTokens,
   simulated_completion_tokens: trace.simulatedCompletionTokens,
-  created_at: trace.createdAt,
+  created_at: trace.createdAt.toISOString(),
 })
 
 const commonMessage = (msg: StoredMessage) => ({
@@ -43,7 +44,7 @@ const commonMessage = (msg: StoredMessage) => ({
   text: msg.text,
   status: msg.status,
   message: msg.reply,
-  created_at: msg.createdAt,
+  created_at: msg.createdAt.toISOString(),
 })
 
 const guestMessage = (msg: StoredMessage) => ({
@@ -81,4 +82,46 @@ export const getConversation = async (identity: Identity, conversationId: string
       identity.role === 'manager' ? managerMessage(m) : guestMessage(m)
     ),
   }
+}
+
+const declineReasonLabels: Record<string, string> = {
+  not_later_than_current_checkout: 'La hora solicitada no es posterior a la salida actual.',
+  after_max_checkout: 'La hora solicitada supera el límite de salida tardía del hotel.',
+  cleaning_conflict: 'Hay un conflicto con la limpieza de la habitación.',
+}
+
+const declineReason = (message: StoredMessage) => {
+  const trace = message.traces.find((item) => item.step === 'reservations.check_availability')
+  const detail = trace?.detail
+
+  if (!detail || typeof detail !== 'object' || !('reason' in detail)) return null
+  const code = detail.reason
+  if (typeof code !== 'string') return null
+
+  return { code, label: declineReasonLabels[code] ?? code }
+}
+
+export const listDeclinedRequests = async (manager: ManagerIdentity) => {
+  const hotelConversations = await conversations.listConversationsForHotel(manager.hotelId)
+
+  return hotelConversations.flatMap((conversation) =>
+    conversation.messages
+      .filter((message) => message.status === 'declined')
+      .map((message) => ({
+        id: message.id,
+        conversation_id: conversation.id,
+        stay_id: conversation.stayId,
+        event_id: message.eventId,
+        question: message.text,
+        response: message.reply,
+        reason: declineReason(message),
+        created_at: message.createdAt.toISOString(),
+      }))
+  )
+}
+
+export type DeclinedRequest = Awaited<ReturnType<typeof listDeclinedRequests>>[number]
+export type ConversationView = Awaited<ReturnType<typeof getConversation>>
+export type ManagerConversationView = Omit<ConversationView, 'messages'> & {
+  messages: ReturnType<typeof managerMessage>[]
 }

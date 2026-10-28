@@ -10,9 +10,11 @@ import type { ChangeRequest, OperationOutcome } from '@/server/clients/reservati
 import { HttpError } from '@/server/errors'
 import * as proposals from '@/server/repositories/proposals'
 import type { ManagerIdentity } from '@/server/schemas/identity'
+import { storedReceipt } from '@/server/schemas/reservations'
 
 const toView = (p: proposals.StoredProposal) => ({
   id: p.id,
+  conversation_id: p.message.conversation.id,
   stay_id: p.message.conversation.stayId,
   status: p.status,
   current_checkout_at: p.currentCheckoutAt,
@@ -22,7 +24,7 @@ const toView = (p: proposals.StoredProposal) => ({
   policy_version: p.policyVersion,
   evidence: { document_id: p.policyDocumentId, version: p.policyVersion, quote: p.policyQuote },
   operation_key: p.operationKey,
-  receipt: p.receipt,
+  receipt: storedReceipt(p.receipt),
 })
 
 const reply = (httpStatus: number, proposal: proposals.StoredProposal, message: string) => ({
@@ -31,9 +33,12 @@ const reply = (httpStatus: number, proposal: proposals.StoredProposal, message: 
     proposal_id: proposal.id,
     status: proposal.status,
     message,
-    receipt: proposal.receipt,
+    receipt: storedReceipt(proposal.receipt),
   },
 })
+
+export type ProposalView = ReturnType<typeof toView>
+export type ProposalReply = ReturnType<typeof reply>['body']
 
 const changeRequestFor = (proposal: proposals.StoredProposal): ChangeRequest => ({
   stayId: proposal.message.conversation.stayId,
